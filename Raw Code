@@ -1,0 +1,118 @@
+Option Explicit
+
+' UDF: AI Formula for Excel
+Function AI(ParamArray args() As Variant) As Variant
+    Dim jsonPayload As String
+    Dim response As String
+    Dim textResponse As String
+    Dim apiUrl As String
+    Dim apiKey As String
+    Dim prompt As String
+    Dim data As String
+    Dim i As Integer
+    Dim cell As Range
+
+    ' Collect data from cell references and construct the prompt
+    data = ""
+    prompt = ""
+    For i = LBound(args) To UBound(args)
+        If TypeName(args(i)) = "Range" Then
+            For Each cell In args(i)
+                data = data & CStr(cell.Value) & ", "
+            Next cell
+            ' Remove trailing comma and space
+            If Len(data) > 2 Then data = Left(data, Len(data) - 2)
+        ElseIf TypeName(args(i)) = "String" Then
+            prompt = prompt & args(i) & " "
+        End If
+    Next i
+    prompt = Trim(prompt)
+
+    ' Construct the full prompt including the data and the user's question
+    If data <> "" Then
+        prompt = "Here is the data: " & data & ". " & prompt & " Provide only the result."
+    Else
+        ' If no cell data was found, just use the prompt as is
+        prompt = prompt & " Provide only the result."
+    End If
+
+    ' 1. Construct JSON payload with roles
+    jsonPayload = "{""contents"": [{""role"": ""user"", ""parts"": [{""text"": """ & EscapeJsonString(prompt) & """}]}]}"
+
+    ' 2. Google Gemini API endpoint and key
+    apiKey = "PUT API KEY HERE"
+    apiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" & apiKey
+
+    ' 3. Send API request
+    response = PostRequestWinHttp(apiUrl, jsonPayload)
+    
+    ' 4. Extract AI response
+    textResponse = ExtractTextFromResponse(response)
+    
+    ' 5. Return the response as-is, with a fallback for errors
+    If textResponse = "No text field in response." Or textResponse = "No text found in response." Then
+        AI = "Error: Could not process the request."
+    Else
+        AI = textResponse
+    End If
+End Function
+'-----------------------------------------------------------------------------------------
+' Helper Function: Sends POST request and returns response.
+Private Function PostRequestWinHttp(ByVal URL As String, ByVal payload As String) As String
+    On Error GoTo ErrHandler
+    
+    Dim httpReq As Object
+    Set httpReq = CreateObject("WinHttp.WinHttpRequest.5.1")
+    
+    httpReq.Open "POST", URL, False
+    httpReq.setRequestHeader "Content-Type", "application/json"
+    httpReq.Send payload
+    
+    If httpReq.Status = 200 Then
+        PostRequestWinHttp = httpReq.responseText
+    Else
+        PostRequestWinHttp = "Error " & httpReq.Status & ": " & httpReq.responseText
+    End If
+    
+ExitFunction:
+    Set httpReq = Nothing
+    Exit Function
+
+ErrHandler:
+    PostRequestWinHttp = "VBA Error: " & Err.Description
+    Resume ExitFunction
+End Function
+
+'-----------------------------------------------------------------------------------------
+' Utility Function: Escapes characters for JSON.
+Private Function EscapeJsonString(ByVal str As String) As String
+    EscapeJsonString = Replace(Replace(Replace(str, "\", "\\"), """", "\"""), vbNewLine, "\n")
+End Function
+
+'-----------------------------------------------------------------------------------------
+' Extracts the AI text response from the JSON.
+Private Function ExtractTextFromResponse(ByVal response As String) As String
+    Dim searchText As String
+    Dim startPos As Long
+    Dim endPos As Long
+    Dim textResponse As String
+    
+    searchText = """text"": """
+    startPos = InStr(1, response, searchText, vbTextCompare)
+    
+    If startPos > 0 Then
+        startPos = startPos + Len(searchText)
+        endPos = InStr(startPos, response, """", vbTextCompare)
+        If endPos > startPos Then
+            textResponse = Mid(response, startPos, endPos - startPos)
+            textResponse = Replace(textResponse, "\n", vbNewLine)
+            ExtractTextFromResponse = textResponse
+        Else
+            ExtractTextFromResponse = "No text found in response."
+        End If
+    Else
+        ExtractTextFromResponse = "No text field in response."
+    End If
+End Function
+
+
